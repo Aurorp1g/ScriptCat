@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name               beautifulcarrot-watermark-remover-batch
 // @name:zh-CN         萝卜工坊批量去水印下载
-// @namespace          https://github.com/scriptscat
+// @namespace          https://github.com/Aurorp1g/ScriptCat
 // @version            2.5.2
 // @description        Remove watermark preview + batch download (ZIP/PDF) for beautifulcarrot.com
 // @description:zh-CN  萝卜工坊去水印工具，支持单页预览去水印、曝光调节、一键批量下载所有页面为ZIP或PDF
@@ -12,6 +12,7 @@
 // @run-at             document-end
 // @require            https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 // @require            https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
+// @supportURL         https://github.com/Aurorp1g/ScriptCat/issues
 // @license            MIT
 // ==/UserScript==
 
@@ -121,41 +122,45 @@
         const width = canvas.width;
         const height = canvas.height;
         
+        const alphaThreshold = 250;
+        
         let minX = width, minY = height, maxX = 0, maxY = 0;
-        let hasContent = false;
+        let found = false;
         
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
-                const idx = (y * width + x) * 4;
-                const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
+                const idx = (y * width + x) * 4 + 3;
+                const alpha = data[idx];
                 
-                const isWhite = r > 245 && g > 245 && b > 245;
-                const isTransparent = a < 20;
-                
-                if (!isTransparent && !isWhite) {
-                    if (!hasContent) {
-                        minX = maxX = x;
-                        minY = maxY = y;
-                        hasContent = true;
-                    } else {
-                        minX = Math.min(minX, x);
-                        maxX = Math.max(maxX, x);
-                        minY = Math.min(minY, y);
-                        maxY = Math.max(maxY, y);
-                    }
+                if (alpha >= alphaThreshold) {
+                    found = true;
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
                 }
             }
         }
         
-        if (!hasContent) return null;
+        if (!found) return null;
         
-        const padding = CONFIG.cropPadding;
-        return {
-            x: Math.max(0, minX - padding),
-            y: Math.max(0, minY - padding),
-            width: Math.min(width - minX, maxX - minX + 1) + Math.min(padding * 2, minX + (width - maxX - 1)),
-            height: Math.min(height - minY, maxY - minY + 1) + Math.min(padding * 2, minY + (height - maxY - 1))
+        minX += 2;
+        maxX -= 2;
+        minY += 2;
+        maxY -= 2;
+        
+        if (minX > maxX) { minX = maxX = (minX + maxX) / 2; }
+        if (minY > maxY) { minY = maxY = (minY + maxY) / 2; }
+        
+        const bounds = {
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
         };
+        
+        console.log(`[精确裁剪] 边界: (${minX}, ${minY}) -> (${maxX}, ${maxY}), 尺寸: ${bounds.width}x${bounds.height}`);
+        return bounds;
     }
 
     function cropCanvas(canvas, bounds) {
