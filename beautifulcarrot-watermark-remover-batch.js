@@ -1,57 +1,62 @@
 // ==UserScript==
-// @name               beautifulcarrot-watermark-remover
-// @name:zh-CN         萝卜工坊去水印
+// @name               beautifulcarrot-watermark-remover-batch
+// @name:zh-CN         萝卜工坊批量去水印下载
 // @namespace          https://github.com/scriptscat
-// @version            1.1.0
-// @description        Remove watermark, adjust exposure, and auto-crop blank areas for beautifulcarrot.com canvas
-// @description:zh-CN  萝卜工坊去水印工具，支持曝光调节、Canvas下载和智能裁剪
+// @version            2.4.1
+// @description        Remove watermark preview + batch download for beautifulcarrot.com
+// @description:zh-CN  萝卜工坊去水印工具，支持单页预览去水印、曝光调节、一键批量下载所有页面
 // @author             Aurorp1g
 // @match              https://beautifulcarrot.com/v2/*
 // @icon               https://cdn.beautifulcarrot.com/static/img/logosmall.png
 // @grant              none
 // @run-at             document-end
+// @require            https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
 // @license            MIT
 // ==/UserScript==
 
 (function () {
     'use strict';
 
+    // ===== 配置项 =====
+    const CONFIG = {
+        defaultExposure: 0,
+        watermarkColor: { r: 0xE7, g: 0xE7, b: 0xE7 },
+        tolerance: 33,
+        cropPadding: 20,
+        delayBetweenPages: 800,
+        zipFileName: '萝卜工坊_批量下载.zip'
+    };
+
+    const originalCanvasData = new Map();
+
     // ===== 工具函数 =====
-    function makeDraggable(el) {
-        let ox = 0, oy = 0, down = false;
-        el.style.position = "fixed";
-        // 如需启用拖拽，取消下方注释
-        /*
-        el.style.cursor = "move";
-        el.addEventListener("mousedown", e => {
-            down = true;
-            ox = e.clientX - el.offsetLeft;
-            oy = e.clientY - el.offsetTop;
-        });
-        document.addEventListener("mousemove", e => {
-            if (!down) return;
-            el.style.left = (e.clientX - ox) + "px";
-            el.style.top = (e.clientY - oy) + "px";
-        });
-        document.addEventListener("mouseup", () => { down = false; });
-        */
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // ===== 找画布 =====
     function getCanvas() {
         return document.querySelector("#pic_canvas");
     }
 
-    // ===== 曝光处理 =====
-    function applyExposure(evValue) {
-        const canvas = getCanvas();
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    function getPageInfo() {
+        const current = window.current_page_index !== undefined ? window.current_page_index : 0;
+        const max = window.max_page_index !== undefined ? window.max_page_index : 0;
+        return { current, max, total: max + 1 };
+    }
 
+    // ===== 图像处理函数 =====
+    function saveOriginalData(canvas) {
+        const pageIndex = window.current_page_index || 0;
+        if (!originalCanvasData.has(pageIndex)) {
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            originalCanvasData.set(pageIndex, ctx.getImageData(0, 0, canvas.width, canvas.height));
+        }
+    }
+
+    function applyExposure(canvas, evValue) {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
-
-        // EV 曝光转换：EV=1 大约亮度 *2；EV=-1 大约亮度 *0.5
         const scale = Math.pow(2, evValue);
 
         for (let i = 0; i < data.length; i += 4) {
@@ -61,24 +66,20 @@
         }
 
         ctx.putImageData(imgData, 0, 0);
+        return canvas;
     }
 
-    // ===== 去水印（亮色提亮） =====
-    function removeWatermark() {
-        const canvas = getCanvas();
-        if (!canvas) return;
+    function removeWatermark(canvas) {
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
-
-        const target = { r: 0xE7, g: 0xE7, b: 0xE7 }; // 浅灰色水印特征值
-        const tol = 33; // 容差
+        const { r: tr, g: tg, b: tb } = CONFIG.watermarkColor;
+        const tol = CONFIG.tolerance;
 
         for (let i = 0; i < data.length; i += 4) {
             let r = data[i], g = data[i+1], b = data[i+2];
 
-            if (Math.abs(r-target.r)<=tol && Math.abs(g-target.g)<=tol && Math.abs(b-target.b)<=tol) {
+            if (Math.abs(r-tr)<=tol && Math.abs(g-tg)<=tol && Math.abs(b-tb)<=tol) {
                 data[i]     = Math.min(r + 100, 255);
                 data[i + 1] = Math.min(g + 100, 255);
                 data[i + 2] = Math.min(b + 100, 255);
@@ -86,10 +87,22 @@
         }
 
         ctx.putImageData(imgData, 0, 0);
+        return canvas;
     }
 
-    // ===== 检测内容边界 =====
-    function getContentBounds(canvas, ctx) {
+    function restoreOriginal(canvas) {
+        const pageIndex = window.current_page_index || 0;
+        const originalData = originalCanvasData.get(pageIndex);
+        if (originalData) {
+            const ctx = canvas.getContext("2d");
+            ctx.putImageData(originalData, 0, 0);
+            return true;
+        }
+        return false;
+    }
+
+    function getContentBounds(canvas) {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imgData.data;
         const width = canvas.width;
@@ -98,14 +111,11 @@
         let minX = width, minY = height, maxX = 0, maxY = 0;
         let hasContent = false;
         
-        // 扫描所有像素，查找非空白区域
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 const idx = (y * width + x) * 4;
                 const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
                 
-                // 判断是否为"有内容"：不透明且不是纯白/浅灰背景
-                // 阈值：alpha > 20，且RGB不全是接近255的值
                 const isWhite = r > 245 && g > 245 && b > 245;
                 const isTransparent = a < 20;
                 
@@ -126,8 +136,7 @@
         
         if (!hasContent) return null;
         
-        // 添加20px边距，但不超过画布边界
-        const padding = 20;
+        const padding = CONFIG.cropPadding;
         return {
             x: Math.max(0, minX - padding),
             y: Math.max(0, minY - padding),
@@ -136,155 +145,521 @@
         };
     }
 
-    // ===== 下载函数（智能裁剪版） =====
-    function downloadCanvas() {
-        const canvas = getCanvas();
-        if (!canvas) return;
-
-        const ctx = canvas.getContext("2d");
-        const bounds = getContentBounds(canvas, ctx);
-        
-        if (!bounds) {
-            alert("未检测到可下载的内容");
-            return;
-        }
-
-        // 创建临时canvas进行裁剪
+    function cropCanvas(canvas, bounds) {
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = bounds.width;
         tempCanvas.height = bounds.height;
-        const tempCtx = tempCanvas.getContext("2d");
+        const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+        tempCtx.drawImage(canvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+        return tempCanvas;
+    }
 
-        // 将原画布指定区域绘制到新canvas
-        tempCtx.drawImage(
-            canvas, 
-            bounds.x, bounds.y, bounds.width, bounds.height,  // 源区域
-            0, 0, bounds.width, bounds.height                 // 目标区域
-        );
+    // ===== 单页功能 =====
+    function previewWatermarkRemoval() {
+        const canvas = getCanvas();
+        if (!canvas) {
+            alert("未检测到画布，请确保已进入预览模式");
+            return;
+        }
+        saveOriginalData(canvas);
+        removeWatermark(canvas);
+        showToast("已去除水印预览，切换页面或点击刷新可恢复原样", 3000);
+    }
 
-        // 下载裁剪后的图片
-        const url = tempCanvas.toDataURL("image/png");
+    function previewWithExposure(evValue) {
+        const canvas = getCanvas();
+        if (!canvas) return;
+        saveOriginalData(canvas);
+        restoreOriginal(canvas);
+        if (evValue !== 0) applyExposure(canvas, evValue);
+        removeWatermark(canvas);
+        showToast(`预览效果：曝光 ${evValue > 0 ? '+' : ''}${evValue}`, 2000);
+    }
+
+    function downloadCurrentPage() {
+        const canvas = getCanvas();
+        if (!canvas) {
+            alert("未检测到画布");
+            return;
+        }
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+        const ctx = tempCanvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(canvas, 0, 0);
+
+        removeWatermark(tempCanvas);
+        const bounds = getContentBounds(tempCanvas);
+        const finalCanvas = bounds ? cropCanvas(tempCanvas, bounds) : tempCanvas;
+        
+        const url = finalCanvas.toDataURL("image/png");
         const a = document.createElement("a");
         a.href = url;
-        a.download = "萝卜工坊_去水印_" + new Date().getTime() + ".png";
+        a.download = `萝卜工坊_第${(window.current_page_index || 0) + 1}页_${Date.now()}.png`;
         a.click();
-        
-        console.log(`[去水印] 裁剪区域: x=${bounds.x}, y=${bounds.y}, w=${bounds.width}, h=${bounds.height}`);
+        showToast("当前页已下载（智能裁剪）");
     }
 
-    // ===== 创建按钮 =====
-    function createButton(text, left, top, onClick) {
-        const btn = document.createElement("div");
-        btn.textContent = text;
-        btn.style.cssText = `
+    // ===== Toast 提示 =====
+    function showToast(message, duration = 3000) {
+        const existing = document.getElementById('watermark-toast');
+        if (existing) existing.remove();
+        
+        const toast = document.createElement("div");
+        toast.id = 'watermark-toast';
+        toast.style.cssText = `
             position: fixed;
-            left: ${left}px;
-            top: ${top}px;
-            padding: 8px 16px;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 1000000;
+            animation: fadeIn 0.3s;
+        `;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transition = 'opacity 0.5s';
+            setTimeout(() => toast.remove(), 500);
+        }, duration);
+    }
+
+    // ===== 批量处理逻辑 =====
+    async function waitForPageLoad(targetIndex) {
+        if (window.current_page_index === targetIndex && window.work_img_src) {
+            await sleep(300);
+            return true;
+        }
+
+        let attempts = 0;
+        const maxAttempts = 30;
+        
+        while (attempts < maxAttempts) {
+            const modal = document.getElementById('loading_show_modal_div');
+            const isModalHidden = !modal || modal.classList.contains('d-none') || modal.style.display === 'none';
+            const indexMatch = window.current_page_index === targetIndex;
+            const hasImage = window.work_img_src && window.work_img_src.length > 0;
+            
+            if (isModalHidden && indexMatch && hasImage) {
+                await sleep(400);
+                return true;
+            }
+            await sleep(100);
+            attempts++;
+        }
+        return false;
+    }
+
+    async function switchToPage(pageIndex) {
+        const currentIndex = window.current_page_index || 0;
+        if (currentIndex === pageIndex) {
+            await sleep(200);
+            return getCanvas();
+        }
+        
+        const targetPage = pageIndex + 1;
+        if (typeof window.switch_page === 'function') {
+            window.switch_page(targetPage);
+        } else {
+            const pageBtn = document.querySelector(`#data_pagination_ul li a[onclick="switch_page(${targetPage})"]`) || 
+                           document.querySelector(`#data_pagination_ul li:nth-child(${targetPage}) a`);
+            if (pageBtn) pageBtn.click();
+        }
+        
+        await waitForPageLoad(pageIndex);
+        return getCanvas();
+    }
+
+    async function batchProcessAllPages(exposureValue = 0, onProgress = () => {}) {
+        const { total, current: originalPage } = getPageInfo();
+        const processedImages = [];
+        
+        console.log(`[批量处理] 共 ${total} 页`);
+        onProgress(0, total, "准备开始...");
+        
+        for (let i = 0; i < total; i++) {
+            try {
+                onProgress(i + 1, total, `正在处理第 ${i + 1}/${total} 页...`);
+                
+                const canvas = await switchToPage(i);
+                if (!canvas || canvas.width === 0) {
+                    console.error(`[批量处理] 第 ${i+1} 页画布无效，跳过`);
+                    continue;
+                }
+                
+                const tempCanvas = document.createElement("canvas");
+                tempCanvas.width = canvas.width;
+                tempCanvas.height = canvas.height;
+                const ctx = tempCanvas.getContext("2d", { willReadFrequently: true });
+                ctx.drawImage(canvas, 0, 0);
+
+                removeWatermark(tempCanvas);
+                if (exposureValue !== 0) applyExposure(tempCanvas, exposureValue);
+                
+                const bounds = getContentBounds(tempCanvas);
+                const finalCanvas = bounds ? cropCanvas(tempCanvas, bounds) : tempCanvas;
+                
+                const blob = await new Promise((resolve) => {
+                    finalCanvas.toBlob(resolve, "image/png");
+                });
+                
+                processedImages.push({
+                    page: i + 1,
+                    blob: blob,
+                    filename: `第${i + 1}页.png`
+                });
+                
+                if (i < total - 1) await sleep(CONFIG.delayBetweenPages);
+                
+            } catch (err) {
+                console.error(`[批量处理] 第 ${i+1} 页失败:`, err);
+            }
+        }
+        
+        if (originalPage !== window.current_page_index) {
+            try {
+                if (typeof window.switch_page === 'function') {
+                    window.switch_page(originalPage + 1);
+                    await waitForPageLoad(originalPage);
+                }
+            } catch (e) {
+                console.warn("恢复原始页面失败:", e);
+            }
+        }
+        
+        return processedImages;
+    }
+
+    async function downloadAsZip(images) {
+        const zip = new JSZip();
+        const folder = zip.folder("萝卜工坊批量下载");
+        images.forEach(img => folder.file(img.filename, img.blob));
+        
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = CONFIG.zipFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // ===== UI 创建（修改：移除右对齐，改为整齐矩形布局） =====
+    function createUI() {
+        // 隐藏原下载按钮
+        const originalBtnDiv = document.getElementById('download_button_div');
+        if (originalBtnDiv) {
+            originalBtnDiv.style.display = 'none';
+        }
+
+        const container = document.createElement("div");
+        container.id = "batch-watermark-container";
+        // 关键修改：固定宽度，移除右对齐，使用标准左对齐形成矩形区域
+        container.style.cssText = `
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 107;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            width: 220px; /* 固定宽度形成矩形 */
+        `;
+
+        const operationDiv = document.getElementById('operation_part_div') || document.body;
+        operationDiv.appendChild(container);
+
+        // 第一行：两个按钮并排，宽度一致
+        const row1 = document.createElement("div");
+        row1.style.cssText = `
+            display: flex;
+            gap: 8px;
+            width: 100%;
+        `;
+
+        // 除水印预览按钮（蓝色）- 宽度50%
+        const previewBtn = document.createElement("button");
+        previewBtn.textContent = "👁️ 除水印预览";
+        previewBtn.title = "预览去水印效果（当前页）";
+        previewBtn.style.cssText = `
+            flex: 1; /* 平均分配宽度 */
+            padding: 8px 0;
             background: linear-gradient(135deg, #187bff, #0056cc);
             color: white;
+            border: none;
             border-radius: 6px;
-            z-index: 999999;
-            user-select: none;
-            font-size: 14px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            box-shadow: 0 2px 8px rgba(24, 123, 255, 0.3);
             cursor: pointer;
-            transition: transform 0.1s, box-shadow 0.1s;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 6px rgba(24, 123, 255, 0.3);
+            transition: transform 0.1s;
+            white-space: nowrap;
+        `;
+        previewBtn.addEventListener("mouseenter", () => previewBtn.style.transform = "scale(1.02)");
+        previewBtn.addEventListener("mouseleave", () => previewBtn.style.transform = "scale(1)");
+        previewBtn.addEventListener("click", () => previewWatermarkRemoval());
+
+        // 下载当前页按钮（绿色）- 宽度50%
+        const downloadBtn = document.createElement("button");
+        downloadBtn.textContent = "💾 下载当前页";
+        downloadBtn.title = "下载当前页（智能裁剪）";
+        downloadBtn.style.cssText = `
+            flex: 1; /* 平均分配宽度 */
+            padding: 8px 0;
+            background: linear-gradient(135deg, #28a745, #1e7e34);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 6px rgba(40, 167, 69, 0.3);
+            transition: transform 0.1s;
+            white-space: nowrap;
+        `;
+        downloadBtn.addEventListener("mouseenter", () => downloadBtn.style.transform = "scale(1.02)");
+        downloadBtn.addEventListener("mouseleave", () => downloadBtn.style.transform = "scale(1)");
+        downloadBtn.addEventListener("click", () => downloadCurrentPage());
+
+        row1.appendChild(previewBtn);
+        row1.appendChild(downloadBtn);
+
+        // 第二行：批量曝光调节（宽度100%填满容器）
+        const exposureWrap = document.createElement("div");
+        exposureWrap.style.cssText = `
+            padding: 10px;
+            background: rgba(108, 117, 125, 0.95);
+            color: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            width: 100%;
+            box-sizing: border-box;
         `;
         
-        // 点击效果
-        btn.addEventListener("mousedown", () => {
-            btn.style.transform = "scale(0.95)";
-            btn.style.boxShadow = "0 1px 4px rgba(24, 123, 255, 0.3)";
-        });
-        btn.addEventListener("mouseup", () => {
-            btn.style.transform = "scale(1)";
-            btn.style.boxShadow = "0 2px 8px rgba(24, 123, 255, 0.3)";
-        });
-
-        btn.addEventListener("click", e => {
-            e.stopPropagation();
-            onClick();
-        });
-
-        document.body.appendChild(btn);
-        makeDraggable(btn);
-        return btn;
-    }
-
-    // ===== 创建滑条控件 =====
-    function createExposureSlider(left, top) {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = `
-            position: fixed;
-            left: ${left}px;
-            top: ${top}px;
-            padding: 8px 12px;
-            background: linear-gradient(135deg, #187bff, #0056cc);
-            color: white;
-            border-radius: 6px;
-            z-index: 999999;
-            user-select: none;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            box-shadow: 0 2px 8px rgba(24, 123, 255, 0.3);
+        const exposureLabel = document.createElement("div");
+        exposureLabel.innerHTML = "<b>📷 批量曝光调节</b> <span style='font-size:11px;opacity:0.8'>(仅影响批量下载)</span>";
+        exposureLabel.style.fontSize = "12px";
+        
+        const exposureInputWrap = document.createElement("div");
+        exposureInputWrap.style.cssText = `
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            width: 100%;
         `;
-
-        const label = document.createElement("span");
-        label.textContent = "曝光";
-        label.style.fontSize = "14px";
-        wrap.appendChild(label);
-
-        const input = document.createElement("input");
-        input.type = "range";
-        input.min = -0.5;
-        input.max = 0.5;
-        input.step = 0.01;
-        input.value = 0;
-        input.style.cssText = `
-            vertical-align: middle;
-            width: 100px;
+        
+        const exposureInput = document.createElement("input");
+        exposureInput.type = "range";
+        exposureInput.min = -0.5;
+        exposureInput.max = 0.5;
+        exposureInput.step = 0.01;
+        exposureInput.value = CONFIG.defaultExposure;
+        exposureInput.style.cssText = `
+            flex: 1;
+            cursor: pointer;
+            margin: 0;
+        `;
+        
+        const exposureValue = document.createElement("span");
+        exposureValue.textContent = "0";
+        exposureValue.style.cssText = `
+            min-width: 30px;
+            font-size: 11px;
+            text-align: center;
+        `;
+        
+        const previewExpBtn = document.createElement("button");
+        previewExpBtn.textContent = "试看";
+        previewExpBtn.style.cssText = `
+            padding: 2px 8px;
+            font-size: 10px;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            border-radius: 4px;
             cursor: pointer;
         `;
         
-        const valueDisplay = document.createElement("span");
-        valueDisplay.textContent = "0";
-        valueDisplay.style.fontSize = "12px";
-        valueDisplay.style.minWidth = "32px";
-        valueDisplay.style.textAlign = "right";
+        exposureInput.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            exposureValue.textContent = val > 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
+        });
+        
+        previewExpBtn.addEventListener("click", () => {
+            previewWithExposure(parseFloat(exposureInput.value));
+        });
+        
+        exposureInputWrap.appendChild(exposureInput);
+        exposureInputWrap.appendChild(exposureValue);
+        exposureInputWrap.appendChild(previewExpBtn);
+        exposureWrap.appendChild(exposureLabel);
+        exposureWrap.appendChild(exposureInputWrap);
 
-        input.addEventListener("input", () => {
-            const val = Number(input.value);
-            valueDisplay.textContent = val.toFixed(2);
-            applyExposure(val);
+        // 第三行：批量处理按钮（宽度100%，红色醒目）
+        const batchBtn = document.createElement("button");
+        batchBtn.textContent = "🚀 批量处理所有页面";
+        batchBtn.style.cssText = `
+            width: 100%;
+            padding: 10px 0;
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+            transition: all 0.2s;
+            white-space: nowrap;
+        `;
+        batchBtn.addEventListener("mouseenter", () => {
+            batchBtn.style.transform = "scale(1.01)";
+            batchBtn.style.boxShadow = "0 4px 12px rgba(220, 53, 69, 0.4)";
+        });
+        batchBtn.addEventListener("mouseleave", () => {
+            batchBtn.style.transform = "scale(1)";
+            batchBtn.style.boxShadow = "0 2px 8px rgba(220, 53, 69, 0.3)";
         });
 
-        wrap.appendChild(input);
-        wrap.appendChild(valueDisplay);
-        document.body.appendChild(wrap);
-        makeDraggable(wrap);
+        // 进度面板（宽度100%，与容器对齐）
+        const progressPanel = document.createElement("div");
+        progressPanel.id = "batch-progress-panel";
+        progressPanel.style.cssText = `
+            padding: 10px;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            border-radius: 6px;
+            font-size: 11px;
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            width: 100%;
+            box-sizing: border-box;
+        `;
+        
+        const progressText = document.createElement("div");
+        progressText.id = "batch-progress-text";
+        progressText.textContent = "准备中...";
+        progressText.style.width = "100%";
+        
+        const progressBar = document.createElement("div");
+        progressBar.style.cssText = `
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            overflow: hidden;
+        `;
+        
+        const progressFill = document.createElement("div");
+        progressFill.id = "batch-progress-fill";
+        progressFill.style.cssText = `
+            height: 100%;
+            width: 0%;
+            background: #28a745;
+            transition: width 0.3s;
+        `;
+        
+        progressBar.appendChild(progressFill);
+        progressPanel.appendChild(progressText);
+        progressPanel.appendChild(progressBar);
+
+        // 组装（垂直堆叠，形成整齐矩形）
+        container.appendChild(row1);
+        container.appendChild(exposureWrap);
+        container.appendChild(batchBtn);
+        container.appendChild(progressPanel);
+
+        // 批量按钮事件
+        batchBtn.addEventListener("click", async () => {
+            const { total } = getPageInfo();
+            if (total <= 0) {
+                alert("未检测到页面，请确保已进入编辑模式且有分页");
+                return;
+            }
+            
+            const exposure = parseFloat(exposureInput.value);
+            const confirmed = confirm(`即将批量处理 ${total} 页并打包下载：\n• 自动去除水印\n• 应用曝光值: ${exposure > 0 ? '+' : ''}${exposure}\n• 智能裁剪空白边距\n\n预计耗时约 ${Math.ceil(total * 1.2)} 秒，是否继续？`);
+            
+            if (!confirmed) return;
+            
+            progressPanel.style.display = "flex";
+            batchBtn.disabled = true;
+            batchBtn.style.opacity = "0.6";
+            
+            try {
+                const images = await batchProcessAllPages(exposure, (current, total, msg) => {
+                    progressText.textContent = msg;
+                    progressFill.style.width = `${(current / total) * 100}%`;
+                });
+                
+                if (images.length === 0) {
+                    alert("没有成功处理任何页面");
+                    return;
+                }
+                
+                progressText.textContent = `正在打包 ${images.length} 张图片...`;
+                
+                if (typeof JSZip !== 'undefined') {
+                    await downloadAsZip(images);
+                    showToast(`✅ 批量下载完成！共 ${images.length} 页`);
+                } else {
+                    alert("ZIP 库加载失败，将逐个下载...");
+                    for (let img of images) {
+                        const url = URL.createObjectURL(img.blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = img.filename;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        await sleep(200);
+                    }
+                }
+                
+            } catch (err) {
+                console.error(err);
+                alert("批量处理出错: " + err.message);
+            } finally {
+                progressPanel.style.display = "none";
+                batchBtn.disabled = false;
+                batchBtn.style.opacity = "1";
+                progressFill.style.width = "0%";
+            }
+        });
     }
 
     // ===== 初始化 =====
     function init() {
-        // 等待画布加载完成
         if (!getCanvas()) {
-            setTimeout(init, 500);
+            setTimeout(init, 1000);
             return;
         }
-        
-        console.log("[萝卜工坊去水印] 脚本已加载（含智能裁剪）");
-        
-        // 创建控制按钮
-        createButton("去水印", 20, 20, removeWatermark);
-        createButton("下载图片", 100, 20, downloadCanvas);
-        createExposureSlider(200, 20);
+        createUI();
+        console.log("[萝卜工坊批量去水印] v2.4.1 已加载 - 整齐矩形布局");
     }
 
-    // 页面加载完成后执行
+    // 添加CSS动画
+    const style = document.createElement("style");
+    style.textContent = `
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+    `;
+    document.head.appendChild(style);
+
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", init);
     } else {
