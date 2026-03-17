@@ -2,7 +2,7 @@
 // @name               beautifulcarrot-watermark-remover-batch
 // @name:zh-CN         萝卜工坊批量去水印下载
 // @namespace          https://github.com/scriptscat
-// @version            2.5.0
+// @version            2.5.2
 // @description        Remove watermark preview + batch download (ZIP/PDF) for beautifulcarrot.com
 // @description:zh-CN  萝卜工坊去水印工具，支持单页预览去水印、曝光调节、一键批量下载所有页面为ZIP或PDF
 // @author             Aurorp1g
@@ -17,6 +17,17 @@
 
 (function () {
     'use strict';
+
+    // ===== Font Awesome 6 内联 SVG 图标定义 =====
+    const ICONS = {
+        eye: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" style="width:14px;height:14px;fill:currentColor;vertical-align:middle;margin-right:4px;"><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM144 256a144 144 0 1 1 288 0 144 144 0 1 1 -288 0zm144-64c0 35.3-28.7 64-64 64c-7.1 0-13.9-1.2-20.3-3.3c-5.8-1.9-11.2 3.4-9.3 9.3c5.7 17.3 20.6 29.7 38.3 29.7c22.5 0 40.7-18.2 40.7-40.7s-18.2-40.7-40.7-40.7c-17.7 0-32.6 12.4-38.3 29.7c-1.9 5.8 3.5 11.2 9.3 9.3c6.4-2.1 13.2-3.3 20.3-3.3c35.3 0 64 28.7 64 64z"/></svg>',
+        download: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width:14px;height:14px;fill:currentColor;vertical-align:middle;margin-right:4px;"><path d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32V274.7l-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7V32zM64 352c-35.3 0-64 28.7-64 64v32c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V416c0-35.3-28.7-64-64-64H298.5l-45.3 45.3c-25 25-65.5 25-90.5 0L117.5 352H64zM432 456c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg>',
+        camera: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width:12px;height:12px;fill:currentColor;vertical-align:middle;margin-right:3px;"><path d="M149.1 64.8L138.7 96H64C28.7 96 0 124.7 0 160V416c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V160c0-35.3-28.7-64-64-64H373.3L362.9 64.8C356.4 45.2 338.1 32 317.4 32H194.6c-20.7 0-39 13.2-45.5 32.8zM256 384c-53 0-96-43-96-96s43-96 96-96s96 43 96 96s-43 96-96 96z"/></svg>',
+        fileZipper: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" style="width:14px;height:14px;fill:currentColor;vertical-align:middle;margin-right:4px;"><path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM96 192c0-8.8 7.2-16 16-16h32c8.8 0 16 7.2 16 16v32c0 8.8-7.2 16-16 16H112c-8.8 0-16-7.2-16-16V192zm48 128c0-8.8 7.2-16 16-16h32c8.8 0 16 7.2 16 16v32c0 8.8-7.2 16-16 16H160c-8.8 0-16-7.2-16-16V320zm-32 96c8.8 0 16-7.2 16-16V384c0-8.8-7.2-16-16-16H112c-8.8 0-16 7.2-16 16v32c0 8.8 7.2 16 16 16h32zm96 32c0-8.8 7.2-16 16-16h32c8.8 0 16 7.2 16 16v32c0 8.8-7.2 16-16 16H224c-8.8 0-16-7.2-16-16V448zm65-192c-8.8 0-16-7.2-16-16V224c0-8.8 7.2-16 16-16h32c8.8 0 16 7.2 16 16v32c0 8.8-7.2 16-16 16h-32zm16 128c-8.8 0-16-7.2-16-16V320c0-8.8 7.2-16 16-16h32c8.8 0 16 7.2 16 16v32c0 8.8-7.2 16-16 16h-32zM224 64H336c8.8 0 16 7.2 16 16s-7.2 16-16 16H224c-8.8 0-16-7.2-16-16s7.2-16 16-16z"/></svg>',
+        filePdf: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width:14px;height:14px;fill:currentColor;vertical-align:middle;margin-right:4px;"><path d="M64 0C28.7 0 0 28.7 0 64V448c0 35.3 28.7 64 64 64H320c35.3 0 64-28.7 64-64V160H256c-17.7 0-32-14.3-32-32V0H64zM256 0V128H384V256H128V0H256zM48 368c0-8.8 7.2-16 16-16h48c8.8 0 16 7.2 16 16v48c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V368zm128 0c0-8.8 7.2-16 16-16h48c8.8 0 16 7.2 16 16v48c0 8.8-7.2 16-16 16H192c-8.8 0-16-7.2-16-16V368zm128 0c0-8.8 7.2-16 16-16h48c8.8 0 16 7.2 16 16v48c0 8.8-7.2 16-16 16H320c-8.8 0-16-7.2-16-16V368z"/></svg>',
+        checkCircle: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width:16px;height:16px;fill:#28a745;vertical-align:middle;margin-right:6px;"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm113-303L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"/></svg>',
+        play: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" style="width:10px;height:10px;fill:currentColor;vertical-align:middle;margin-right:3px;"><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.9 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg>'
+    };
 
     // ===== 配置项 =====
     const CONFIG = {
@@ -221,8 +232,11 @@
             font-size: 14px;
             z-index: 1000000;
             animation: fadeIn 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         `;
-        toast.textContent = message;
+        toast.innerHTML = `${ICONS.checkCircle} ${message}`;
         document.body.appendChild(toast);
         
         setTimeout(() => {
@@ -311,7 +325,6 @@
                     finalCanvas.toBlob(resolve, "image/png");
                 });
                 
-                // 保存图片尺寸信息用于PDF生成
                 processedImages.push({
                     page: i + 1,
                     blob: blob,
@@ -361,11 +374,9 @@
     async function generatePDF(images, onProgress = () => {}) {
         const { jsPDF } = window.jspdf;
         
-        // 计算最适合的页面尺寸（以第一页为基准，或者使用A4）
         const firstImg = images[0];
         const isLandscape = firstImg && firstImg.width > firstImg.height;
         
-        // 创建PDF，使用A4尺寸，根据图片方向自动选择横向或纵向
         const pdf = new jsPDF({
             orientation: isLandscape ? 'landscape' : 'portrait',
             unit: 'mm',
@@ -375,7 +386,7 @@
 
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
-        const margin = 5; // 边距5mm
+        const margin = 5;
 
         for (let i = 0; i < images.length; i++) {
             onProgress(i + 1, images.length, `正在生成PDF...第${i + 1}/${images.length}页`);
@@ -383,7 +394,6 @@
             const img = images[i];
             const imgData = await blobToBase64(img.blob);
             
-            // 计算图片在PDF中的尺寸（保持比例，自适应页面）
             const availableWidth = pageWidth - 2 * margin;
             const availableHeight = pageHeight - 2 * margin;
             
@@ -392,29 +402,23 @@
             
             let finalWidth, finalHeight;
             if (imgRatio > pageRatio) {
-                // 图片更宽，以宽度为基准
                 finalWidth = availableWidth;
                 finalHeight = availableWidth / imgRatio;
             } else {
-                // 图片更高，以高度为基准
                 finalHeight = availableHeight;
                 finalWidth = availableHeight * imgRatio;
             }
             
-            // 居中显示
             const x = margin + (availableWidth - finalWidth) / 2;
             const y = margin + (availableHeight - finalHeight) / 2;
             
-            // 添加图片到PDF
             pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
             
-            // 如果不是最后一页，添加新页面
             if (i < images.length - 1) {
                 pdf.addPage();
             }
         }
         
-        // 保存PDF
         pdf.save(CONFIG.pdfFileName);
         return true;
     }
@@ -430,7 +434,6 @@
 
     // ===== UI 创建 =====
     function createUI() {
-        // 隐藏原下载按钮
         const originalBtnDiv = document.getElementById('download_button_div');
         if (originalBtnDiv) {
             originalBtnDiv.style.display = 'none';
@@ -462,7 +465,7 @@
         `;
 
         const previewBtn = document.createElement("button");
-        previewBtn.textContent = "👁️ 除水印预览";
+        previewBtn.innerHTML = `${ICONS.eye} 除水印预览`;
         previewBtn.title = "预览去水印效果（当前页）";
         previewBtn.style.cssText = `
             flex: 1;
@@ -477,13 +480,16 @@
             box-shadow: 0 2px 6px rgba(24, 123, 255, 0.3);
             transition: transform 0.1s;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         `;
         previewBtn.addEventListener("mouseenter", () => previewBtn.style.transform = "scale(1.02)");
         previewBtn.addEventListener("mouseleave", () => previewBtn.style.transform = "scale(1)");
         previewBtn.addEventListener("click", () => previewWatermarkRemoval());
 
         const downloadBtn = document.createElement("button");
-        downloadBtn.textContent = "💾 下载当前页";
+        downloadBtn.innerHTML = `${ICONS.download} 下载当前页`;
         downloadBtn.title = "下载当前页（智能裁剪）";
         downloadBtn.style.cssText = `
             flex: 1;
@@ -498,6 +504,9 @@
             box-shadow: 0 2px 6px rgba(40, 167, 69, 0.3);
             transition: transform 0.1s;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         `;
         downloadBtn.addEventListener("mouseenter", () => downloadBtn.style.transform = "scale(1.02)");
         downloadBtn.addEventListener("mouseleave", () => downloadBtn.style.transform = "scale(1)");
@@ -522,7 +531,7 @@
         `;
         
         const exposureLabel = document.createElement("div");
-        exposureLabel.innerHTML = "<b>📷 批量曝光调节</b> <span style='font-size:11px;opacity:0.8'>(影响批量下载)</span>";
+        exposureLabel.innerHTML = `${ICONS.camera} <b>批量曝光调节</b> <span style="font-size:11px;opacity:0.8">(影响批量下载)</span>`;
         exposureLabel.style.fontSize = "12px";
         
         const exposureInputWrap = document.createElement("div");
@@ -554,7 +563,7 @@
         `;
         
         const previewExpBtn = document.createElement("button");
-        previewExpBtn.textContent = "试看";
+        previewExpBtn.innerHTML = `${ICONS.play} 试看`;
         previewExpBtn.style.cssText = `
             padding: 2px 8px;
             font-size: 10px;
@@ -563,6 +572,9 @@
             color: white;
             border-radius: 4px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         `;
         
         exposureInput.addEventListener("input", (e) => {
@@ -582,7 +594,7 @@
 
         // 第三行：批量下载按钮（ZIP）
         const batchBtn = document.createElement("button");
-        batchBtn.textContent = "🚀 批量下载 (ZIP)";
+        batchBtn.innerHTML = `${ICONS.fileZipper} 批量下载 (ZIP)`;
         batchBtn.style.cssText = `
             width: 100%;
             padding: 10px 0;
@@ -596,6 +608,10 @@
             box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
             transition: all 0.2s;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
         `;
         batchBtn.addEventListener("mouseenter", () => {
             batchBtn.style.transform = "scale(1.01)";
@@ -606,9 +622,9 @@
             batchBtn.style.boxShadow = "0 2px 8px rgba(220, 53, 69, 0.3)";
         });
 
-        // 第四行：生成PDF按钮（新增）
+        // 第四行：生成PDF按钮
         const pdfBtn = document.createElement("button");
-        pdfBtn.textContent = "📄 生成PDF文档";
+        pdfBtn.innerHTML = `${ICONS.filePdf} 生成PDF文档`;
         pdfBtn.style.cssText = `
             width: 100%;
             padding: 10px 0;
@@ -622,6 +638,10 @@
             box-shadow: 0 2px 8px rgba(111, 66, 193, 0.3);
             transition: all 0.2s;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
         `;
         pdfBtn.addEventListener("mouseenter", () => {
             pdfBtn.style.transform = "scale(1.01)";
@@ -679,7 +699,7 @@
         container.appendChild(row1);
         container.appendChild(exposureWrap);
         container.appendChild(batchBtn);
-        container.appendChild(pdfBtn); // 添加PDF按钮
+        container.appendChild(pdfBtn);
         container.appendChild(progressPanel);
 
         // ZIP批量下载事件
@@ -693,7 +713,7 @@
         });
     }
 
-    // 抽取的批量处理函数，支持ZIP和PDF两种模式
+    // 抽取的批量处理函数
     async function startBatchProcess(mode, exposureInput, progressPanel, progressText, progressFill, batchBtn, pdfBtn) {
         const { total } = getPageInfo();
         if (total <= 0) {
@@ -727,17 +747,15 @@
             progressText.textContent = mode === 'pdf' ? `正在生成PDF，包含 ${images.length} 页...` : `正在打包 ${images.length} 张图片...`;
             
             if (mode === 'pdf') {
-                // 生成PDF
                 await generatePDF(images, (current, total, msg) => {
                     progressText.textContent = msg;
                     progressFill.style.width = `${(current / total) * 100}%`;
                 });
-                showToast(`✅ PDF生成完成！共 ${images.length} 页`);
+                showToast(`PDF生成完成！共 ${images.length} 页`);
             } else {
-                // ZIP下载
                 if (typeof JSZip !== 'undefined') {
                     await downloadAsZip(images);
-                    showToast(`✅ 批量下载完成！共 ${images.length} 页`);
+                    showToast(`批量下载完成！共 ${images.length} 页`);
                 } else {
                     alert("ZIP 库加载失败，将逐个下载...");
                     for (let img of images) {
@@ -772,7 +790,7 @@
             return;
         }
         createUI();
-        console.log("[萝卜工坊批量去水印] v2.5.0 已加载 - 支持ZIP和PDF导出");
+        console.log("[萝卜工坊批量去水印] v2.5.2 已加载 - 内联 SVG 图标版");
     }
 
     // 添加CSS动画
