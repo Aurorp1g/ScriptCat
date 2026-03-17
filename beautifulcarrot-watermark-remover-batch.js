@@ -2,15 +2,16 @@
 // @name               beautifulcarrot-watermark-remover-batch
 // @name:zh-CN         萝卜工坊批量去水印下载
 // @namespace          https://github.com/scriptscat
-// @version            2.4.1
-// @description        Remove watermark preview + batch download for beautifulcarrot.com
-// @description:zh-CN  萝卜工坊去水印工具，支持单页预览去水印、曝光调节、一键批量下载所有页面
+// @version            2.5.0
+// @description        Remove watermark preview + batch download (ZIP/PDF) for beautifulcarrot.com
+// @description:zh-CN  萝卜工坊去水印工具，支持单页预览去水印、曝光调节、一键批量下载所有页面为ZIP或PDF
 // @author             Aurorp1g
 // @match              https://beautifulcarrot.com/v2/*
 // @icon               https://cdn.beautifulcarrot.com/static/img/logosmall.png
 // @grant              none
 // @run-at             document-end
 // @require            https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js
+// @require            https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
 // @license            MIT
 // ==/UserScript==
 
@@ -24,7 +25,8 @@
         tolerance: 33,
         cropPadding: 20,
         delayBetweenPages: 800,
-        zipFileName: '萝卜工坊_批量下载.zip'
+        zipFileName: '萝卜工坊_批量下载.zip',
+        pdfFileName: '萝卜工坊_批量下载.pdf'
     };
 
     const originalCanvasData = new Map();
@@ -309,10 +311,13 @@
                     finalCanvas.toBlob(resolve, "image/png");
                 });
                 
+                // 保存图片尺寸信息用于PDF生成
                 processedImages.push({
                     page: i + 1,
                     blob: blob,
-                    filename: `第${i + 1}页.png`
+                    filename: `第${i + 1}页.png`,
+                    width: finalCanvas.width,
+                    height: finalCanvas.height
                 });
                 
                 if (i < total - 1) await sleep(CONFIG.delayBetweenPages);
@@ -352,7 +357,78 @@
         URL.revokeObjectURL(url);
     }
 
-    // ===== UI 创建（修改：移除右对齐，改为整齐矩形布局） =====
+    // ===== PDF生成功能 =====
+    async function generatePDF(images, onProgress = () => {}) {
+        const { jsPDF } = window.jspdf;
+        
+        // 计算最适合的页面尺寸（以第一页为基准，或者使用A4）
+        const firstImg = images[0];
+        const isLandscape = firstImg && firstImg.width > firstImg.height;
+        
+        // 创建PDF，使用A4尺寸，根据图片方向自动选择横向或纵向
+        const pdf = new jsPDF({
+            orientation: isLandscape ? 'landscape' : 'portrait',
+            unit: 'mm',
+            format: 'a4',
+            compress: true
+        });
+
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 5; // 边距5mm
+
+        for (let i = 0; i < images.length; i++) {
+            onProgress(i + 1, images.length, `正在生成PDF...第${i + 1}/${images.length}页`);
+            
+            const img = images[i];
+            const imgData = await blobToBase64(img.blob);
+            
+            // 计算图片在PDF中的尺寸（保持比例，自适应页面）
+            const availableWidth = pageWidth - 2 * margin;
+            const availableHeight = pageHeight - 2 * margin;
+            
+            const imgRatio = img.width / img.height;
+            const pageRatio = availableWidth / availableHeight;
+            
+            let finalWidth, finalHeight;
+            if (imgRatio > pageRatio) {
+                // 图片更宽，以宽度为基准
+                finalWidth = availableWidth;
+                finalHeight = availableWidth / imgRatio;
+            } else {
+                // 图片更高，以高度为基准
+                finalHeight = availableHeight;
+                finalWidth = availableHeight * imgRatio;
+            }
+            
+            // 居中显示
+            const x = margin + (availableWidth - finalWidth) / 2;
+            const y = margin + (availableHeight - finalHeight) / 2;
+            
+            // 添加图片到PDF
+            pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
+            
+            // 如果不是最后一页，添加新页面
+            if (i < images.length - 1) {
+                pdf.addPage();
+            }
+        }
+        
+        // 保存PDF
+        pdf.save(CONFIG.pdfFileName);
+        return true;
+    }
+
+    function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // ===== UI 创建 =====
     function createUI() {
         // 隐藏原下载按钮
         const originalBtnDiv = document.getElementById('download_button_div');
@@ -362,7 +438,6 @@
 
         const container = document.createElement("div");
         container.id = "batch-watermark-container";
-        // 关键修改：固定宽度，移除右对齐，使用标准左对齐形成矩形区域
         container.style.cssText = `
             position: absolute;
             top: 16px;
@@ -372,13 +447,13 @@
             flex-direction: column;
             gap: 8px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            width: 220px; /* 固定宽度形成矩形 */
+            width: 220px;
         `;
 
         const operationDiv = document.getElementById('operation_part_div') || document.body;
         operationDiv.appendChild(container);
 
-        // 第一行：两个按钮并排，宽度一致
+        // 第一行：除水印预览 + 下载当前页
         const row1 = document.createElement("div");
         row1.style.cssText = `
             display: flex;
@@ -386,12 +461,11 @@
             width: 100%;
         `;
 
-        // 除水印预览按钮（蓝色）- 宽度50%
         const previewBtn = document.createElement("button");
         previewBtn.textContent = "👁️ 除水印预览";
         previewBtn.title = "预览去水印效果（当前页）";
         previewBtn.style.cssText = `
-            flex: 1; /* 平均分配宽度 */
+            flex: 1;
             padding: 8px 0;
             background: linear-gradient(135deg, #187bff, #0056cc);
             color: white;
@@ -408,12 +482,11 @@
         previewBtn.addEventListener("mouseleave", () => previewBtn.style.transform = "scale(1)");
         previewBtn.addEventListener("click", () => previewWatermarkRemoval());
 
-        // 下载当前页按钮（绿色）- 宽度50%
         const downloadBtn = document.createElement("button");
         downloadBtn.textContent = "💾 下载当前页";
         downloadBtn.title = "下载当前页（智能裁剪）";
         downloadBtn.style.cssText = `
-            flex: 1; /* 平均分配宽度 */
+            flex: 1;
             padding: 8px 0;
             background: linear-gradient(135deg, #28a745, #1e7e34);
             color: white;
@@ -433,7 +506,7 @@
         row1.appendChild(previewBtn);
         row1.appendChild(downloadBtn);
 
-        // 第二行：批量曝光调节（宽度100%填满容器）
+        // 第二行：批量曝光调节
         const exposureWrap = document.createElement("div");
         exposureWrap.style.cssText = `
             padding: 10px;
@@ -449,7 +522,7 @@
         `;
         
         const exposureLabel = document.createElement("div");
-        exposureLabel.innerHTML = "<b>📷 批量曝光调节</b> <span style='font-size:11px;opacity:0.8'>(仅影响批量下载)</span>";
+        exposureLabel.innerHTML = "<b>📷 批量曝光调节</b> <span style='font-size:11px;opacity:0.8'>(影响批量下载)</span>";
         exposureLabel.style.fontSize = "12px";
         
         const exposureInputWrap = document.createElement("div");
@@ -507,9 +580,9 @@
         exposureWrap.appendChild(exposureLabel);
         exposureWrap.appendChild(exposureInputWrap);
 
-        // 第三行：批量处理按钮（宽度100%，红色醒目）
+        // 第三行：批量下载按钮（ZIP）
         const batchBtn = document.createElement("button");
-        batchBtn.textContent = "🚀 批量处理所有页面";
+        batchBtn.textContent = "🚀 批量下载 (ZIP)";
         batchBtn.style.cssText = `
             width: 100%;
             padding: 10px 0;
@@ -533,7 +606,33 @@
             batchBtn.style.boxShadow = "0 2px 8px rgba(220, 53, 69, 0.3)";
         });
 
-        // 进度面板（宽度100%，与容器对齐）
+        // 第四行：生成PDF按钮（新增）
+        const pdfBtn = document.createElement("button");
+        pdfBtn.textContent = "📄 生成PDF文档";
+        pdfBtn.style.cssText = `
+            width: 100%;
+            padding: 10px 0;
+            background: linear-gradient(135deg, #6f42c1, #5a32a3);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(111, 66, 193, 0.3);
+            transition: all 0.2s;
+            white-space: nowrap;
+        `;
+        pdfBtn.addEventListener("mouseenter", () => {
+            pdfBtn.style.transform = "scale(1.01)";
+            pdfBtn.style.boxShadow = "0 4px 12px rgba(111, 66, 193, 0.4)";
+        });
+        pdfBtn.addEventListener("mouseleave", () => {
+            pdfBtn.style.transform = "scale(1)";
+            pdfBtn.style.boxShadow = "0 2px 8px rgba(111, 66, 193, 0.3)";
+        });
+
+        // 进度面板
         const progressPanel = document.createElement("div");
         progressPanel.id = "batch-progress-panel";
         progressPanel.style.cssText = `
@@ -576,42 +675,66 @@
         progressPanel.appendChild(progressText);
         progressPanel.appendChild(progressBar);
 
-        // 组装（垂直堆叠，形成整齐矩形）
+        // 组装UI
         container.appendChild(row1);
         container.appendChild(exposureWrap);
         container.appendChild(batchBtn);
+        container.appendChild(pdfBtn); // 添加PDF按钮
         container.appendChild(progressPanel);
 
-        // 批量按钮事件
+        // ZIP批量下载事件
         batchBtn.addEventListener("click", async () => {
-            const { total } = getPageInfo();
-            if (total <= 0) {
-                alert("未检测到页面，请确保已进入编辑模式且有分页");
+            await startBatchProcess('zip', exposureInput, progressPanel, progressText, progressFill, batchBtn, pdfBtn);
+        });
+
+        // PDF生成事件
+        pdfBtn.addEventListener("click", async () => {
+            await startBatchProcess('pdf', exposureInput, progressPanel, progressText, progressFill, batchBtn, pdfBtn);
+        });
+    }
+
+    // 抽取的批量处理函数，支持ZIP和PDF两种模式
+    async function startBatchProcess(mode, exposureInput, progressPanel, progressText, progressFill, batchBtn, pdfBtn) {
+        const { total } = getPageInfo();
+        if (total <= 0) {
+            alert("未检测到页面，请确保已进入编辑模式且有分页");
+            return;
+        }
+        
+        const exposure = parseFloat(exposureInput.value);
+        const modeText = mode === 'pdf' ? '生成PDF' : '打包ZIP';
+        const confirmed = confirm(`即将批量处理 ${total} 页并${modeText}：\n• 自动去除水印\n• 应用曝光值: ${exposure > 0 ? '+' : ''}${exposure}\n• 智能裁剪空白边距\n\n预计耗时约 ${Math.ceil(total * 1.5)} 秒，是否继续？`);
+        
+        if (!confirmed) return;
+        
+        progressPanel.style.display = "flex";
+        batchBtn.disabled = true;
+        pdfBtn.disabled = true;
+        batchBtn.style.opacity = "0.6";
+        pdfBtn.style.opacity = "0.6";
+        
+        try {
+            const images = await batchProcessAllPages(exposure, (current, total, msg) => {
+                progressText.textContent = msg;
+                progressFill.style.width = `${(current / total) * 100}%`;
+            });
+            
+            if (images.length === 0) {
+                alert("没有成功处理任何页面");
                 return;
             }
             
-            const exposure = parseFloat(exposureInput.value);
-            const confirmed = confirm(`即将批量处理 ${total} 页并打包下载：\n• 自动去除水印\n• 应用曝光值: ${exposure > 0 ? '+' : ''}${exposure}\n• 智能裁剪空白边距\n\n预计耗时约 ${Math.ceil(total * 1.2)} 秒，是否继续？`);
+            progressText.textContent = mode === 'pdf' ? `正在生成PDF，包含 ${images.length} 页...` : `正在打包 ${images.length} 张图片...`;
             
-            if (!confirmed) return;
-            
-            progressPanel.style.display = "flex";
-            batchBtn.disabled = true;
-            batchBtn.style.opacity = "0.6";
-            
-            try {
-                const images = await batchProcessAllPages(exposure, (current, total, msg) => {
+            if (mode === 'pdf') {
+                // 生成PDF
+                await generatePDF(images, (current, total, msg) => {
                     progressText.textContent = msg;
                     progressFill.style.width = `${(current / total) * 100}%`;
                 });
-                
-                if (images.length === 0) {
-                    alert("没有成功处理任何页面");
-                    return;
-                }
-                
-                progressText.textContent = `正在打包 ${images.length} 张图片...`;
-                
+                showToast(`✅ PDF生成完成！共 ${images.length} 页`);
+            } else {
+                // ZIP下载
                 if (typeof JSZip !== 'undefined') {
                     await downloadAsZip(images);
                     showToast(`✅ 批量下载完成！共 ${images.length} 页`);
@@ -627,17 +750,19 @@
                         await sleep(200);
                     }
                 }
-                
-            } catch (err) {
-                console.error(err);
-                alert("批量处理出错: " + err.message);
-            } finally {
-                progressPanel.style.display = "none";
-                batchBtn.disabled = false;
-                batchBtn.style.opacity = "1";
-                progressFill.style.width = "0%";
             }
-        });
+            
+        } catch (err) {
+            console.error(err);
+            alert("批量处理出错: " + err.message);
+        } finally {
+            progressPanel.style.display = "none";
+            batchBtn.disabled = false;
+            pdfBtn.disabled = false;
+            batchBtn.style.opacity = "1";
+            pdfBtn.style.opacity = "1";
+            progressFill.style.width = "0%";
+        }
     }
 
     // ===== 初始化 =====
@@ -647,7 +772,7 @@
             return;
         }
         createUI();
-        console.log("[萝卜工坊批量去水印] v2.4.1 已加载 - 整齐矩形布局");
+        console.log("[萝卜工坊批量去水印] v2.5.0 已加载 - 支持ZIP和PDF导出");
     }
 
     // 添加CSS动画
