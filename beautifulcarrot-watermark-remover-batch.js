@@ -795,7 +795,7 @@
             return;
         }
         createUI();
-        console.log("[萝卜工坊批量去水印] v2.5.2 已加载 - 内联 SVG 图标版");
+        console.log("[萝卜工坊批量去水印] v2.5.2 已加载");
     }
 
     // 添加CSS动画
