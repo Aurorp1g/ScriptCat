@@ -23,6 +23,20 @@ ScriptCat 是一款功能强大的浏览器用户脚本管理器，支持 Grease
 
 **支持网站：** beautifulcarrot.com
 
+### chaoxing-helper.user.js
+
+超星网课小助手。
+
+**功能特点：**
+- 视频自动播放、章节测试
+- 自动挂机、多开不占网速
+- 支持图片题答题
+- 自定义正确率
+- 掉线自动登录
+- 防清进度
+
+**支持网站：** 超星学习通系列网站
+
 ## 安装方法
 
 1. 安装 [ScriptCat 浏览器扩展](https://scriptcat.org/)
